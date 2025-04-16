@@ -1,9 +1,9 @@
-import scrapy,os,platform,re
+import scrapy,os,platform,re,json
 from crawldata.functions import *
 from datetime import datetime
 
 class CrawlerSpider(scrapy.Spider):
-    name = 'rolmax'
+    name = 'meca'
     DATE_CRAWL=datetime.now().strftime('%Y-%m-%d')
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0','Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8','Accept-Language': 'en-GB,en;q=0.5','Connection': 'keep-alive','Upgrade-Insecure-Requests': '1','Sec-Fetch-Dest': 'document','Sec-Fetch-Mode': 'navigate','Sec-Fetch-Site': 'none','Sec-Fetch-User': '?1','Priority': 'u=0, i'}
     headers_post = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0','Accept': '*/*','Accept-Language': 'en-GB,en;q=0.5','Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With': 'XMLHttpRequest','Origin': 'https://www.techniekwebshop.nl','Connection': 'keep-alive','Sec-Fetch-Dest': 'empty','Sec-Fetch-Mode': 'cors','Sec-Fetch-Site': 'same-origin','Priority': 'u=0'}
@@ -11,42 +11,32 @@ class CrawlerSpider(scrapy.Spider):
         URL='file:////' + os.getcwd()+'/scrapy.cfg'
     else:
         URL='file:///' + os.getcwd()+'/scrapy.cfg'
-    domain='https://www.rolmax-sklep.pl/'
+    domain='https://www.mecaservicesshop.fr/7057-kramp'
     page_urls=[]
 
     def start_requests(self):
-        self.get_db_data()
-        yield scrapy.Request(self.domain,callback=self.parse_categories,dont_filter=True)
+        yield scrapy.Request(self.domain,callback=self.parse_list,dont_filter=True)
 
     def parse_categories(self,response):
-        links = response.xpath('//a[@class="categories__link"]/@href').getall()
 
-        for link in links:
-            yield scrapy.Request(response.urljoin(link), callback=self.parse_subcategories, dont_filter=True)
-    
-    def parse_subcategories(self, response):
-        # links = response.xpath('//ul[@class="side-menu__categories"]//li[@class="active"]/ul[@class="side-menu__subcategories"]/li/a/@href').getall()
-        # if not links:
-        link = response.url
-        # self.parse_list(response)
+        page_count = response.xpath('(//ul[contains(@class, "page-list")]//a[@class="js-search-link"])[last()]/text()').extract_first()
+        if page_count:
+            page_count = int(page_count)
 
-        last_page_index = response.xpath('//ul[@class="list-nav__item pages"]/li[position()=last()-1]/a/text()').extract_first()
+        
+        for i in range(page_count):
+            link = response.url
+            if i > 0:
+                link = link + f"?page={i+1}"
+            yield scrapy.Request(link, callback=self.parse_list, dont_filter=True)
 
-        if last_page_index:
-            page_count = int(last_page_index)
-            for i in range(page_count):
-                next_link = ''
-                if i > 0:
-                    next_link = link.replace('.html', '')
-                    next_link = f"{next_link},s{i}.html"
-                else:
-                    next_link = link
-                
-                if next_link not in self.page_urls:
-                    yield scrapy.Request(next_link, callback=self.parse_list, dont_filter=True)
+        
 
     def parse_list(self, response):
-        links = response.xpath('//a[@class="product__name-link"]/@href').getall()
+        # print(response.url)
+        links = response.xpath('//div[@class="product-image-container"]/a[contains(@class, "product-thumbnail")]/@href').getall()
+        # link = 'https://www.mecaservicesshop.fr/reservoir-et-filtres/1036437-filter-20-mesh-screen-banjo.html'
+        # yield scrapy.Request(link, callback=self.parse_data, dont_filter=True)
         for link in links:
             yield scrapy.Request(response.urljoin(link), callback=self.parse_data, dont_filter=True)
 
@@ -57,9 +47,7 @@ class CrawlerSpider(scrapy.Spider):
         item['base_image'] = ''
         item['brand'] = ''
         item['breadcrumb'] = ''
-        item['shipping_time'] = ''
         item['description'] = ''
-        item['manufacturer'] = ''
         item['name'] = ''
         item['part_number'] = ''
         item['price'] = 0.00
@@ -69,117 +57,109 @@ class CrawlerSpider(scrapy.Spider):
         item['thumbnail_image'] = ''
         item['discount_price'] = 0.00
         item['reviews'] = []
-        item['guarantee_months'] = 0
         item['review_number'] = 0
+        item['tech_spec'] = {}
 
-        base_image = response.xpath('//img[@class="product-cart__image" and @itemprop="image"]/@src').extract_first()
+        base_image = response.xpath('//div[@class="product-cover"]/img/@src').extract_first()
         if base_image:
             item['base_image'] = response.urljoin(base_image)
             item['thumbnail_image'] = response.urljoin(base_image)
             item['small_image'] = response.urljoin(base_image)
 
-        additional_image_links = response.xpath('//img[@class="product-cart__gallery-image"]/@rel').getall()
+        additional_image_links = response.xpath('//li[@class="thumb-container"]/img/@data-image-large-src').getall()
         for additional_image in additional_image_links:
             item['additional_images'].append(response.urljoin(additional_image))
         
         if item['base_image'] in item['additional_images']:
             item['additional_images'].remove(item['base_image'])
-
-        brand = response.xpath('//a[@class="product-cart__producer-link"]/span//text()').extract_first()
+        
+        brand = response.xpath('//div[@itemprop="brand"]/a//text()').extract_first()
         if not brand:
             brand = 'unbranded'
 
         item['brand'] = brand
-        item['manufacturer'] = brand
-        
-        breadcrumb_all = response.xpath('//ol[@class="breadcrumbs__list"]/li[position() > 1]/a/span/text()').getall()
+
+        breadcrumb_all = response.xpath('//nav[contains(@class, "breadcrumb")]//li[position() > 1]/a/span/text()').getall()
         if breadcrumb_all:
             breadcrumb = "/".join(breadcrumb_all)
             item['breadcrumb'] = breadcrumb
-        
-        shipping_time = response.xpath('//div[@class="product-cart__item1" and text()="Czas wysyłki:"]/following-sibling::div[1]//text()').extract_first()
-        if shipping_time:
-            item['shipping_time'] = shipping_time
-        
-        shipping_cost = response.xpath('//div[@class="product-cart__item1" and text()="Koszty dostawy:"]/following-sibling::div[1]//text()').getall()
-        if shipping_cost:
-            item['shipping_cost'] = "".join(shipping_cost)
 
-        description = response.xpath('//div[contains(@class, "desc-text--main")]//text()').getall()
-        if description:
-            item['description'] = re.sub(r'<!--.*?-->|Rozwiń opis', '', "".join(description), flags=re.DOTALL).strip()
-
-        name = response.xpath('//h1[@class="product-cart__name"]//text()').extract_first()
+        descriptions = response.xpath('//div[contains(@class, "desc") or contains(@class,"description")]//table/tbody//text()').getall()
+        if descriptions:
+            for description in descriptions:
+                item['description'] = item['description']+ description.strip()
+                if description.strip():
+                    item['description'] = item['description']+ ' '
+   
+        name = response.xpath('//h1[@class="product_name"]/text()').extract_first().strip()
         if name:
             item['name'] = name
 
         item['original_page_url'] = response.url
         
-        part_number = response.xpath('//*[contains(text(), "Kod producenta:")]/text()').extract_first()
+        part_number = response.xpath('//div[contains(@class,"product-reference_top")][1]/span/text()').extract_first()
         if part_number:
-            part_number = part_number.replace("Kod producenta: ", "")
-            part_number = re.sub(r'[^A-Za-z0-9]', '', part_number)
             item['part_number'] = part_number
         
-        price = response.xpath('//span[@itemprop="price"]/text()').extract_first()
+        price = response.xpath('//meta[@property="product:price:amount"]/@content').extract_first()
         if price:
             item['price'] = float(price)
 
-        price_currency = response.xpath('//span[@itemprop="priceCurrency"]/text()').extract_first()
+        price_currency = response.xpath('//meta[@property="product:price:currency"]/@content').extract_first()
         if price_currency:
             item['price_currency'] = price_currency
-
-        qty = response.xpath('//input[@class="shopping-box__quantity-input"]/@value').extract_first()
+        
+        qty = response.xpath('//input[@name="qty"]/@value').extract_first()
         if qty:
             item['qty'] = int(qty)
 
         if part_number and brand:
-            sku = f"{item['brand']}-{item['part_number']}"
+            part_number = re.sub(r'[^A-Za-z0-9]', '', part_number)
+            sku = f"{item['brand']}-{part_number}"
             sku = sku.lower().replace(' - ', '-')
             item['sku'] = sku.replace(' ', '-')
         
-        guarantee_months = response.xpath('//div[@class="product-cart__item1" and text()="Gwarancja:"]/following-sibling::div[1]//text()').extract_first()
-        if guarantee_months:
-            if ' miesiące' in guarantee_months:
-                guarantee_months = guarantee_months.replace(' miesiące', '')
-                if guarantee_months:
-                    item['guarantee_months'] = int(guarantee_months)
-        
-        discount_price = response.xpath('//span[@class="pnetto"]//text()').extract_first()
+        discount_price = response.xpath('//div[@id="product-details"]/@data-product').extract_first()
         if discount_price:
-            match = re.search(r'(\d+\.\d+)', discount_price)
-            if match:
-                discount_price = match.group(0)
-                item['discount_price'] = discount_price
+            product_data = json.loads(discount_price)
+            if product_data['discount_amount']:
+                discount_price = re.sub(r'[^\d,.-]', '', product_data['discount_amount'])
+                discount_price = discount_price.replace(',', '.')
+                item['discount_price'] = float(discount_price)
         
-        review_number = response.xpath('//span[@itemprop="reviewCount"]//text()').extract_first()
-        if review_number:
-            item['review_number'] = review_number
+        tech_spec_keys = response.xpath('//section[@class="product-features"]/dl/dt//text()').getall()
+        tech_spec_values = response.xpath('//section[@class="product-features"]/dl/dd//text()').getall()
 
-        reviews_data = response.xpath('//li[@class="reviews__list-item"]')
-        for review_data in reviews_data:
-            it = {}
-            author = review_data.xpath('.//span[@class="reviews__review-author"]//text()').extract_first()
-            score = review_data.xpath('.//span[@class="rating__color-stars"]/@data-rating').extract_first()
-            text = review_data.xpath('.//span[@class="reviews__review-txt"]//text()').extract_first()
-            date = review_data.xpath('.//span[@class="reviews__review-date"]//text()').extract_first()
+        if tech_spec_keys:
+            count = len(tech_spec_keys)
+            for i in range(count):
+                tech_spec_key = tech_spec_keys[i]
+                tech_spec_value = tech_spec_values[i]
+                item['tech_spec'][tech_spec_key] = tech_spec_value
+        
+        
+        # review_number = response.xpath('//span[@itemprop="reviewCount"]//text()').extract_first()
+        # if review_number:
+        #     item['review_number'] = review_number
+
+        # reviews_data = response.xpath('//li[@class="reviews__list-item"]')
+        # for review_data in reviews_data:
+        #     it = {}
+        #     author = review_data.xpath('.//span[@class="reviews__review-author"]//text()').extract_first()
+        #     score = review_data.xpath('.//span[@class="rating__color-stars"]/@data-rating').extract_first()
+        #     text = review_data.xpath('.//span[@class="reviews__review-txt"]//text()').extract_first()
+        #     date = review_data.xpath('.//span[@class="reviews__review-date"]//text()').extract_first()
             
-            it['author'] = author
-            it['score'] = score
-            it['text'] = text
-            it['date'] = date
+        #     it['author'] = author
+        #     it['score'] = score
+        #     it['text'] = text
+        #     it['date'] = date
 
-            item['reviews'].append(it)
+        #     item['reviews'].append(it)
         
-        id = response.xpath('//meta[contains(@itemprop, "sku")]/@content').extract_first()
-        item['original_id']=key_MD5(item['breadcrumb'])+'_'+str(id)
 
         yield item
 
     def get_db_data(self):
         with open('rolmax_dump.csv', 'r') as f:
             self.page_urls = {url.strip().strip('"') for url in f}
-        
-        print("sdfsdfsdfsdfsdf")
-        
-
