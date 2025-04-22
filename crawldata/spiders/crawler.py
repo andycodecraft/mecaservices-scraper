@@ -11,29 +11,26 @@ class CrawlerSpider(scrapy.Spider):
         URL='file:////' + os.getcwd()+'/scrapy.cfg'
     else:
         URL='file:///' + os.getcwd()+'/scrapy.cfg'
-    domain='https://www.mecaservicesshop.fr/7057-kramp'
+    # domain='https://www.mecaservicesshop.fr/7057-kramp'
+    domain='https://www.mecaservicesshop.fr/23-motoculture'
     page_urls=[]
 
     def start_requests(self):
-        yield scrapy.Request(self.domain,callback=self.parse_list,dont_filter=True)
+        yield scrapy.Request(self.domain,callback=self.parse_categories,dont_filter=True)
 
     def parse_categories(self,response):
 
         page_count = response.xpath('(//ul[contains(@class, "page-list")]//a[@class="js-search-link"])[last()]/text()').extract_first()
         if page_count:
             page_count = int(page_count)
-
         
         for i in range(page_count):
             link = response.url
             if i > 0:
                 link = link + f"?page={i+1}"
-            yield scrapy.Request(link, callback=self.parse_list, dont_filter=True)
-
-        
+            yield scrapy.Request(link, callback=self.parse_list, dont_filter=True, meta={'delay_request': True})
 
     def parse_list(self, response):
-        # print(response.url)
         links = response.xpath('//div[@class="product-image-container"]/a[contains(@class, "product-thumbnail")]/@href').getall()
         # link = 'https://www.mecaservicesshop.fr/reservoir-et-filtres/1036437-filter-20-mesh-screen-banjo.html'
         # yield scrapy.Request(link, callback=self.parse_data, dont_filter=True)
@@ -84,12 +81,9 @@ class CrawlerSpider(scrapy.Spider):
             breadcrumb = "/".join(breadcrumb_all)
             item['breadcrumb'] = breadcrumb
 
-        descriptions = response.xpath('//div[contains(@class, "desc") or contains(@class,"description")]//table/tbody//text()').getall()
+        descriptions = response.xpath('//div[contains(@class, "desc") or contains(@class,"description")]//table').extract_first()
         if descriptions:
-            for description in descriptions:
-                item['description'] = item['description']+ description.strip()
-                if description.strip():
-                    item['description'] = item['description']+ ' '
+            item['description'] = descriptions
    
         name = response.xpath('//h1[@class="product_name"]/text()').extract_first().strip()
         if name:
@@ -99,6 +93,8 @@ class CrawlerSpider(scrapy.Spider):
         
         part_number = response.xpath('//div[contains(@class,"product-reference_top")][1]/span/text()').extract_first()
         if part_number:
+            if '-' in part_number:
+                part_number = part_number.split('-')[-1]
             item['part_number'] = part_number
         
         price = response.xpath('//meta[@property="product:price:amount"]/@content').extract_first()

@@ -26,40 +26,33 @@ class CrawldataPipeline:
         if self.conn.is_connected():
             self.conn.close()
     def process_item(self, item, spider):
-        sql="SELECT * FROM `"+self.TABLE+"` WHERE original_page_url='"+item['original_page_url']+"'"
-        try:
-            CHK=get_data_db(self.conn,sql)
-        except:
-            self.conn = mysql.connector.connect(host=self.HOST,database=self.DATABASE_NAME,user=self.username,password=self.password,charset='utf8')
-            CHK=get_data_db(self.conn,sql)
-        if len(CHK)==0:
-            FIELDS=['created_at']
-            VALUES=["'"+spider.DATE_CRAWL+"'"]
-            for k,v in item.items():
-                FIELDS.append(k)
-                if k in ('additional_images','reviews', 'tech_spec'):
-                    VALUES.append("'"+str(json.dumps(item[k])).replace("'","''").replace("\\n","\\\\n")+"'")
+        FIELDS = ['created_at']
+        VALUES = ["'" + spider.DATE_CRAWL + "'"]
+
+        for k, v in item.items():
+            FIELDS.append(k)
+            if k in ('additional_images', 'reviews', 'tech_spec'):
+                VALUES.append("'" + str(json.dumps(item[k])).replace("'", "''").replace("\\n", "\\\\n") + "'")
+            else:
+                VALUES.append("'" + str(v).replace("'", "''") + "'")
+
+        sql = "INSERT INTO `" + self.TABLE + "` (" + (",".join(FIELDS)) + ") VALUES (" + (",".join(VALUES)) + ") " \
+            "ON DUPLICATE KEY UPDATE updated_at='" + spider.DATE_CRAWL + "', "
+
+        update_fields = []
+        for k, v in item.items():
+            if k != 'original_page_url':
+                if k in ('additional_images', 'reviews', 'tech_spec'):
+                    update_fields.append(k + "='" + json.dumps(item[k]).replace("'", "''").replace("\\n", "\\\\n") + "'")
                 else:
-                    VALUES.append("'"+str(v).replace("'","''")+"'")
-            sql="INSERT INTO `"+self.TABLE+"` ("+(",".join(FIELDS))+") VALUES("+(",".join(VALUES))+")"
-            try:
-                RUNSQL(self.conn,sql)
-            except:
-                self.conn = mysql.connector.connect(host=self.HOST,database=self.DATABASE_NAME,user=self.username,password=self.password,charset='utf8')
-                RUNSQL(self.conn,sql)
-        else:
-            UPDATE=[]
-            for k,v in item.items():
-                if not k in ('original_page_url'):
-                    if k in ('additional_images','reviews','tech_spec'):
-                        UPDATE.append(k+"='"+json.dumps(item[k]).replace("'","''").replace("\\n","\\\\n")+"'")
-                    else:
-                        UPDATE.append(k+"='"+str(v).replace("'","''")+"'")
-            sql="UPDATE `"+self.TABLE+"` SET updated_at='"+spider.DATE_CRAWL+"',"+(",".join(UPDATE))+" WHERE original_page_url='"+item['original_page_url']+"'"
-            try:
-                RUNSQL(self.conn,sql)
-            except:
-                self.conn = mysql.connector.connect(host=self.HOST,database=self.DATABASE_NAME,user=self.username,password=self.password,charset='utf8')
-                RUNSQL(self.conn,sql)
-            pass
+                    update_fields.append(k + "='" + str(v).replace("'", "''") + "'")
+
+        sql += ", ".join(update_fields)
+
+        try:
+            RUNSQL(self.conn, sql)
+        except:
+            self.conn = mysql.connector.connect(host=self.HOST, database=self.DATABASE_NAME, user=self.username, password=self.password, charset='utf8')
+            RUNSQL(self.conn, sql)
+
         return item

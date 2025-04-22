@@ -1,4 +1,5 @@
 
+import time
 from scrapy import signals
 
 # useful for handling different item types with a single interface
@@ -61,9 +62,13 @@ class CrawldataDownloaderMiddleware:
         # This method is used by Scrapy to create your spiders.
         s = cls()
         crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
+        s.delay = crawler.settings.get('CUSTOM_DELAY', 5)
         return s
 
     def process_request(self, request, spider):
+        if request.meta.get('delay_request'):
+            spider.logger.info(f'Delaying request for {self.delay} seconds for {request.url}')
+            time.sleep(self.delay)
         # Called for each request that goes through the downloader
         # middleware.
         # Must either:
